@@ -1,50 +1,260 @@
-# Q&A Chatbot
-#from langchain.llms import OpenAI
-
-from dotenv import load_dotenv
-
-load_dotenv()  # take environment variables from .env.
+```python
+import os
 
 import streamlit as st
-import os
-import pathlib
-import textwrap
-
 import google.generativeai as genai
 
-from IPython.display import display
-from IPython.display import Markdown
+
+# ---------------------------------------------------------
+# PAGE CONFIGURATION
+# ---------------------------------------------------------
+st.set_page_config(
+    page_title="Gemini AI Chatbot",
+    page_icon="🤖",
+    layout="centered"
+)
 
 
-def to_markdown(text):
-  text = text.replace('•', '  *')
-  return Markdown(textwrap.indent(text, '> ', predicate=lambda _: True))
+# ---------------------------------------------------------
+# CUSTOM CSS
+# ---------------------------------------------------------
+st.markdown(
+    """
+    <style>
+        .main-title {
+            text-align: center;
+            font-size: 42px;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
 
-os.getenv("GOOGLE_API_KEY")
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+        .subtitle {
+            text-align: center;
+            color: #777;
+            font-size: 17px;
+            margin-bottom: 30px;
+        }
 
-## Function to load OpenAI model and get respones
+        .response-box {
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #ddd;
+            margin-top: 20px;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
+
+# ---------------------------------------------------------
+# GET API KEY
+# ---------------------------------------------------------
+def get_api_key():
+    """
+    Get GOOGLE_API_KEY from Streamlit Secrets.
+    For local development, .env / environment variable
+    can also be used.
+    """
+
+    # Streamlit Cloud
+    try:
+        api_key = st.secrets["GOOGLE_API_KEY"]
+        if api_key:
+            return api_key
+    except Exception:
+        pass
+
+    # Local environment variable
+    api_key = os.getenv("GOOGLE_API_KEY")
+
+    return api_key
+
+
+# ---------------------------------------------------------
+# CONFIGURE GEMINI
+# ---------------------------------------------------------
+api_key = get_api_key()
+
+if not api_key:
+    st.error("❌ GOOGLE_API_KEY is not configured.")
+
+    st.info(
+        """
+        ### Streamlit Cloud Setup
+
+        Go to:
+
+        **Manage app → Settings → Secrets**
+
+        Add:
+
+        `GOOGLE_API_KEY = "YOUR_API_KEY"`
+        """
+    )
+
+    st.stop()
+
+
+try:
+    genai.configure(api_key=api_key)
+except Exception as e:
+    st.error("❌ Failed to configure Gemini API.")
+    st.exception(e)
+    st.stop()
+
+
+# ---------------------------------------------------------
+# GEMINI MODEL
+# ---------------------------------------------------------
+@st.cache_resource
+def load_model():
+    """
+    Load the Gemini model once and reuse it.
+    """
+    return genai.GenerativeModel("gemini-pro")
+
+
+try:
+    model = load_model()
+except Exception as e:
+    st.error("❌ Unable to load Gemini model.")
+    st.exception(e)
+    st.stop()
+
+
+# ---------------------------------------------------------
+# GEMINI RESPONSE FUNCTION
+# ---------------------------------------------------------
 def get_gemini_response(question):
-    model = genai.GenerativeModel('gemini-pro')
-    response = model.generate_content(question)
-    return response.text
+    """
+    Send the user's question to Gemini
+    and return the generated response.
+    """
 
-##initialize our streamlit app
+    if not question or not question.strip():
+        return "Please enter a question."
 
-st.set_page_config(page_title="Q&A Demo")
+    try:
+        response = model.generate_content(question)
 
-st.header("Gemini Application")
+        if response and hasattr(response, "text"):
+            return response.text
 
-input=st.text_input("Input: ",key="input")
+        return "Sorry, Gemini did not return a response."
+
+    except Exception as e:
+        return f"❌ Gemini API Error: {str(e)}"
 
 
-submit=st.button("Ask the question")
+# ---------------------------------------------------------
+# HEADER
+# ---------------------------------------------------------
+st.markdown(
+    '<div class="main-title">🤖 Gemini AI Chatbot</div>',
+    unsafe_allow_html=True
+)
 
-## If ask button is clicked
+st.markdown(
+    '<div class="subtitle">Ask anything and get an AI-powered answer.</div>',
+    unsafe_allow_html=True
+)
 
-if submit:
-    
-    response=get_gemini_response(input)
-    st.subheader("The Response is")
-    st.write(response)
+
+# ---------------------------------------------------------
+# CHAT HISTORY
+# ---------------------------------------------------------
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+
+# ---------------------------------------------------------
+# USER INPUT
+# ---------------------------------------------------------
+question = st.text_input(
+    "💬 Enter your question",
+    placeholder="Example: Explain machine learning in simple words...",
+    key="question"
+)
+
+
+# ---------------------------------------------------------
+# BUTTONS
+# ---------------------------------------------------------
+col1, col2 = st.columns(2)
+
+with col1:
+    ask_button = st.button(
+        "🚀 Ask Gemini",
+        use_container_width=True
+    )
+
+with col2:
+    clear_button = st.button(
+        "🗑️ Clear Chat",
+        use_container_width=True
+    )
+
+
+# ---------------------------------------------------------
+# CLEAR CHAT
+# ---------------------------------------------------------
+if clear_button:
+    st.session_state.chat_history = []
+    st.rerun()
+
+
+# ---------------------------------------------------------
+# ASK GEMINI
+# ---------------------------------------------------------
+if ask_button:
+
+    if not question.strip():
+        st.warning("⚠️ Please enter a question first.")
+
+    else:
+
+        with st.spinner("🤔 Gemini is thinking..."):
+
+            answer = get_gemini_response(question)
+
+        # Save conversation
+        st.session_state.chat_history.append(
+            {
+                "question": question,
+                "answer": answer
+            }
+        )
+
+
+# ---------------------------------------------------------
+# DISPLAY CHAT HISTORY
+# ---------------------------------------------------------
+if st.session_state.chat_history:
+
+    st.subheader("💬 Conversation")
+
+    for chat in reversed(st.session_state.chat_history):
+
+        st.markdown("### 👤 You")
+        st.write(chat["question"])
+
+        st.markdown("### 🤖 Gemini")
+
+        st.markdown(
+            f"""
+            <div class="response-box">
+                {chat["answer"]}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+
+# ---------------------------------------------------------
+# FOOTER
+# ---------------------------------------------------------
+st.markdown("---")
+
+st.caption("Powered by Google Gemini + Streamlit")
+```
